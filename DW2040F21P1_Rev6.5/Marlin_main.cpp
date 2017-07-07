@@ -1987,6 +1987,9 @@ void process_commands()
       }
 	  
       break;
+    case 667: // implementazione tuning automatico
+	gcode_G667();
+	break;
     }
   }
 
@@ -4520,5 +4523,274 @@ bool setTargetedHotend(int code){
   }
   return false;
 }
+
+// by Rossonet
+/**
+ * Propone un setting ottimale per il diametro della delta
+ * e il setting dei tre end stop
+ *
+ * il risultato finale sarà stampanto, ma non salvato in flash
+ *
+ *
+ */
+inline void gcode_G667() {
+	float centroX = 20;
+	float centroY = 20;
+	float torreXX = -70;
+	float torreXY = -30;
+	float torreYX = 105;
+	float torreYY = -30;
+	float torreZX = 20;
+	float torreZY = 114;
+
+	float baseRilevamentiZ = 60.0;
+
+	int cicliTorri = 3;
+	int cicliRaggio = 2;
+
+	int scartoAccettato = 0.5;
+
+	float passoRaggio = 0.9;
+
+	float rilevamentoCentro = 0;
+	float rilevamentoX = 0;
+	float rilevamentoY = 0;
+	float rilevamentoZ = 0;
+
+	SERIAL_ECHOLNPGM("Configurazioni automatiche fine corsa e diametro");
+	SERIAL_ECHOLNPGM("by Rossonet");
+	SERIAL_ECHOLNPGM("ATTENZIONE! Versione beta, monitorare la macchina durante l'esecuzione...");
+	CONFIG_ECHO_START; 
+	SERIAL_ECHOLNPGM("Attuale situazione endstops (mm):"); 
+	CONFIG_ECHO_START; 
+	SERIAL_ECHOPAIR(" X", endstop_adj[X_AXIS]); 
+	SERIAL_ECHOPAIR(" Y", endstop_adj[Y_AXIS]); 
+	SERIAL_ECHOPAIR(" Z", endstop_adj[Z_AXIS]); 
+	SERIAL_EOL; 
+	
+	CONFIG_ECHO_START; 
+	SERIAL_ECHOPAIR("Lunghezza braccia (mm):", delta_diagonal_rod); 
+	SERIAL_ECHOPAIR(" Diametro stampante (mm):", delta_radius); 
+	SERIAL_EOL; 
+
+	SERIAL_ECHOLNPGM("Inizio i rilevamenti..."); 
+	float correzioneX = endstop_adj[X_AXIS];
+	float correzioneY = endstop_adj[Y_AXIS];
+	float correzioneZ = endstop_adj[Z_AXIS];
+	for (int contatoreCicli = 1; contatoreCicli <= (cicliTorri+cicliRaggio); contatoreCicli++){
+		gcode_G28_ros();
+		st_synchronize();
+		if (contatoreCicli>cicliTorri) rilevamentoCentro = probe_pt(centroX, centroY, baseRilevamentiZ, ProbeDeploy, 1);
+		if (contatoreCicli>cicliTorri) rilevamentoX = probe_pt(torreXX, torreXY, baseRilevamentiZ, ProbeStay, 1);
+		if (!(contatoreCicli>cicliTorri)) rilevamentoX = probe_pt(torreXX, torreXY, baseRilevamentiZ, ProbeDeploy, 1);
+		rilevamentoY = probe_pt(torreYX, torreYY, baseRilevamentiZ, ProbeStay, 1);
+		rilevamentoZ = probe_pt(torreZX, torreZY, baseRilevamentiZ, ProbeStow, 1);
+		SERIAL_ECHOLNPGM("Rilevamento (mm):"); 
+		CONFIG_ECHO_START; 
+		if (contatoreCicli>cicliTorri) SERIAL_ECHOPAIR("Centro:", rilevamentoCentro); 
+		SERIAL_ECHOPAIR(" X:", rilevamentoX); 
+		SERIAL_ECHOPAIR(" Y:", rilevamentoY); 
+		SERIAL_ECHOPAIR(" Z:", rilevamentoZ); 
+		SERIAL_EOL; 
+
+		// aggiusta anche il diametro
+		if (contatoreCicli>cicliTorri) {
+			if (rilevamentoCentro>rilevamentoX && rilevamentoCentro>rilevamentoY && rilevamentoCentro>rilevamentoZ){
+				delta_radius=delta_radius-(passoRaggio*(rilevamentoCentro-((rilevamentoX+rilevamentoY+rilevamentoZ)/3))); 
+				recalc_delta_settings(delta_radius, delta_diagonal_rod);
+				SERIAL_ECHOLNPGM("Correzione diametro per centro alto:");
+				CONFIG_ECHO_START;
+				SERIAL_ECHOPAIR(" M665 R", delta_radius);
+				SERIAL_ECHOPAIR(" L", delta_diagonal_rod);
+				SERIAL_ECHOPAIR(" S", delta_segments_per_second);
+				SERIAL_EOL;	
+			}
+			if (rilevamentoCentro<rilevamentoX && rilevamentoCentro<rilevamentoY && rilevamentoCentro<rilevamentoZ){
+				delta_radius=delta_radius+(passoRaggio*(((rilevamentoX+rilevamentoY+rilevamentoZ)/3)-rilevamentoCentro)); 
+				recalc_delta_settings(delta_radius, delta_diagonal_rod);
+				SERIAL_ECHOLNPGM("Correzione diametro per centro basso:");
+				CONFIG_ECHO_START;
+				SERIAL_ECHOPAIR(" M665 R", delta_radius);
+				SERIAL_ECHOPAIR(" L", delta_diagonal_rod);
+				SERIAL_ECHOPAIR(" S", delta_segments_per_second);
+				SERIAL_EOL;	
+			}
+		}
+
+		//aggiustamenti
+		float deltaX = 0;
+		float deltaY = 0;
+		float deltaZ = 0;
+
+		//X è il più grande
+		if (rilevamentoX>rilevamentoY && rilevamentoX>rilevamentoZ ){
+			//Z è il più piccolo
+			if(rilevamentoY>rilevamentoZ){
+				deltaY = 0;
+				deltaX=rilevamentoY-rilevamentoX;
+				deltaZ=rilevamentoY-rilevamentoZ;
+			//Y è il più piccolo
+			} else {
+				deltaZ = 0;
+				deltaX=rilevamentoZ-rilevamentoX;
+				deltaY=rilevamentoZ-rilevamentoY;
+			}
+
+		}
+		//Y è il più grande
+		if (rilevamentoY>rilevamentoX && rilevamentoY>rilevamentoZ ){
+			//Z è il più piccolo
+                        if(rilevamentoX>rilevamentoZ){
+				deltaX = 0;
+                                deltaY=rilevamentoX-rilevamentoY;
+                                deltaZ=rilevamentoX-rilevamentoZ;
+			//X è il più piccolo
+                        } else {
+				deltaZ = 0;
+                                deltaY=rilevamentoZ-rilevamentoY;
+                                deltaX=rilevamentoZ-rilevamentoX;
+                        }
+
+		}
+		//Z è il più grande
+		if (rilevamentoZ>rilevamentoX && rilevamentoZ>rilevamentoY ){
+			//X è il più piccolo
+                        if(rilevamentoY>rilevamentoX){
+				deltaY = 0;
+                                deltaZ=rilevamentoY-rilevamentoZ;
+                                deltaX=rilevamentoY-rilevamentoX;
+			//Y è il più piccolo
+                        } else {
+				deltaX = 0;
+                                deltaZ=rilevamentoX-rilevamentoZ;
+                                deltaY=rilevamentoX-rilevamentoY;
+                        }
+		}
+
+		correzioneX=correzioneX-deltaX;
+		correzioneY=correzioneY-deltaY;
+		correzioneZ=correzioneZ-deltaZ;
+
+		//elimina i valori positivi abbassando
+		if (correzioneX>0){
+			correzioneX=correzioneX-correzioneX;
+			correzioneY=correzioneY-correzioneX;
+			correzioneZ=correzioneZ-correzioneX;
+		}
+		if (correzioneY>0){
+			correzioneX=correzioneX-correzioneY;
+			correzioneY=correzioneY-correzioneY;
+			correzioneZ=correzioneZ-correzioneY;
+		}
+		if (correzioneZ>0){
+			correzioneX=correzioneX-correzioneZ;
+			correzioneY=correzioneY-correzioneZ;
+			correzioneZ=correzioneZ-correzioneZ;
+		}
+        	
+		endstop_adj[X_AXIS]=correzioneX;
+	        endstop_adj[Y_AXIS]=correzioneY;
+		endstop_adj[Z_AXIS]=correzioneZ;
+
+		SERIAL_ECHOLNPGM("Configurazione applicata dopo questo ciclo:");
+		CONFIG_ECHO_START;
+		SERIAL_ECHOPAIR("  M666 X", correzioneX);
+		SERIAL_ECHOPAIR(" Y", correzioneY);
+		SERIAL_ECHOPAIR(" Z", correzioneZ);
+		SERIAL_EOL;	
+		
+	}
+	SERIAL_ECHOLNPGM("Fine rilevamenti G667 (by Rossonet)");
+	gcode_G28_ros();
+}
+
+/**
+ * Spurgo estrusore in posizione specifica fuori dal raggio
+ * di stampa
+ *
+ * Questa funzione è un precursore per il cambio utensili
+ *
+ */
+inline void gcode_G668() {
+	SERIAL_ECHOLNPGM("Comando G668 in fase di implementazione...");
+}
+
+/** G28 by Rossonet per funzioni **/
+void gcode_G28_ros() {
+
+	// Wait for planner moves to finish!
+	st_synchronize();
+
+	// For auto bed leveling, clear the level matrix
+#ifdef ENABLE_AUTO_BED_LEVELING
+	plan_bed_level_matrix.set_to_identity();
+#ifdef DELTA
+	reset_bed_level();
+#endif
+#endif
+
+	// For manual bed leveling deactivate the matrix temporarily
+#ifdef MESH_BED_LEVELING
+	uint8_t mbl_was_active = mbl.active;
+	mbl.active = 0;
+#endif
+
+	setup_for_endstop_move();
+
+	set_destination_to_current();
+
+	feedrate = 0.0;
+
+	// A delta can only safely home all axis at the same time
+	// all axis have to home at the same time
+
+	// Pretend the current position is 0,0,0
+	for (int i = X_AXIS; i <= Z_AXIS; i++) current_position[i] = 0;
+	sync_plan_position();
+
+	// Move all carriages up together until the first endstop is hit.
+	while (! ((READ(X_MAX_PIN)^X_MAX_ENDSTOP_INVERTING)||(READ(Y_MAX_PIN)^Y_MAX_ENDSTOP_INVERTING)||(READ(Z_MAX_PIN)^Z_MAX_ENDSTOP_INVERTING))){
+		for (int i = X_AXIS; i <= Z_AXIS; i++) destination[i] = 150 * Z_MAX_LENGTH;
+		feedrate = 3 * homing_feedrate[X_AXIS];
+		line_to_destination();
+		st_synchronize();
+		}
+	endstops_hit_on_purpose(); // clear endstop hit flags
+
+	// Destination reached
+	for (int i = X_AXIS; i <= Z_AXIS; i++) current_position[i] = destination[i];
+
+	// take care of back off and rehome now we are all at the top
+	HOMEAXIS(X);
+	HOMEAXIS(Y);
+	HOMEAXIS(Z);
+
+	sync_plan_position_delta();
+
+  #ifdef ENDSTOPS_ONLY_FOR_HOMING
+    enable_endstops(false);
+  #endif
+
+  // For manual leveling move back to 0,0
+  #ifdef MESH_BED_LEVELING
+    if (mbl_was_active) {
+      current_position[X_AXIS] = mbl.get_x(0);
+      current_position[Y_AXIS] = mbl.get_y(0);
+      set_destination_to_current();
+      feedrate = homing_feedrate[X_AXIS];
+      line_to_destination();
+      st_synchronize();
+      current_position[Z_AXIS] = MESH_HOME_SEARCH_Z;
+      sync_plan_position();
+      mbl.active = 1;
+    }
+  #endif
+
+  feedrate = saved_feedrate;
+  feedrate_multiplier = saved_feedrate_multiplier;
+  refresh_cmd_timeout();
+  endstops_hit_on_purpose(); // clear endstop hit flags
+}
+
 
 
