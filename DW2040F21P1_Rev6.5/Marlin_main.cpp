@@ -187,6 +187,10 @@ http://www.wasproject.it
 CardReader card;
 
 #endif
+
+//Per G667 e G668 by Rossonet
+#define CONFIG_ECHO_START do{ if (true) SERIAL_ECHO_START; }while(0)
+
 float homing_feedrate[] = HOMING_FEEDRATE;
 bool axis_relative_modes[] = AXIS_RELATIVE_MODES;
 bool Estopped=false;
@@ -680,6 +684,12 @@ void loop()
   lcd_update();
 }
 
+
+
+
+
+
+
 void get_command()
 {
   while( MYSERIAL.available() > 0  && buflen < BUFSIZE) {
@@ -1039,39 +1049,50 @@ static void set_bed_level_equation_3pts(float z_at_pt_1, float z_at_pt_2, float 
 
 }
 
+
 #endif // AUTO_BED_LEVELING_GRID
 
+
 static void run_z_probe() {
-    plan_bed_level_matrix.set_to_identity();
-    feedrate = homing_feedrate[Z_AXIS];
+    #ifdef DELTA
+    float start_z = current_position[Z_AXIS];
+    long start_steps = st_get_position(Z_AXIS);
 
-    // move down until you find the bed
-    float zPosition = -10;
-    plan_buffer_line(current_position[X_AXIS], current_position[Y_AXIS], zPosition, current_position[E_AXIS], feedrate/60, active_extruder);
+    // move down slowly until you find the bed
+    feedrate = homing_feedrate[Z_AXIS] / 4;
+    destination[Z_AXIS] = -10;
+    //float zPosition = -10;
+    //plan_buffer_line(current_position[X_AXIS], current_position[Y_AXIS], zPosition, current_position[E_AXIS], feedrate/60, active_extruder);
+    prepare_move_raw(); // this will also set_current_to_destination
     st_synchronize();
+    endstops_hit_on_purpose(); // clear endstop hit flags
 
-        // we have to let the planner know where we are right now as it is not where we said to go.
-    zPosition = st_get_position_mm(Z_AXIS);
-    plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], zPosition, current_position[E_AXIS]);
+    // we have to let the planner know where we are right now as it is not where we said to go.
+    long stop_steps = st_get_position(Z_AXIS);
+    float mm = start_z - float(start_steps - stop_steps) / axis_steps_per_unit[Z_AXIS];
+    current_position[Z_AXIS] = mm;
 
-    // move up the retract distance
-    zPosition += home_retract_mm(Z_AXIS);
-    plan_buffer_line(current_position[X_AXIS], current_position[Y_AXIS], zPosition, current_position[E_AXIS], feedrate/60, active_extruder);
-    st_synchronize();
-
-    // move back down slowly to find bed
-    feedrate = homing_feedrate[Z_AXIS]/4;
-    zPosition -= home_retract_mm(Z_AXIS) * 2;
-    plan_buffer_line(current_position[X_AXIS], current_position[Y_AXIS], zPosition, current_position[E_AXIS], feedrate/60, active_extruder);
-    st_synchronize();
-
-    current_position[Z_AXIS] = st_get_position_mm(Z_AXIS);
-    // make sure the planner knows where we are as it may be a bit different than we last said to move to
-    plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS]);
+    calculate_delta(current_position);
+    plan_set_position(delta[X_AXIS], delta[Y_AXIS], delta[Z_AXIS], current_position[E_AXIS]);
+    //sync_plan_position_delta();
+    #endif
 }
 
 static void do_blocking_move_to(float x, float y, float z) {
     float oldFeedRate = feedrate;
+
+    #ifdef DELTA
+
+      feedrate = XY_TRAVEL_SPEED;
+
+      destination[X_AXIS] = x;
+      destination[Y_AXIS] = y;
+      destination[Z_AXIS] = z;
+      prepare_move_raw(); // this will also set_current_to_destination
+      st_synchronize();
+
+    #else
+
 
     feedrate = homing_feedrate[Z_AXIS];
 
@@ -1085,6 +1106,8 @@ static void do_blocking_move_to(float x, float y, float z) {
     current_position[Y_AXIS] = y;
     plan_buffer_line(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS], feedrate/60, active_extruder);
     st_synchronize();
+
+    #endif
 
     feedrate = oldFeedRate;
 }
@@ -1147,13 +1170,18 @@ static void retract_z_probe() {
 /// Probe bed height at position (x,y), returns the measured z value
 static float probe_pt(float x, float y, float z_before) {
   // move to right place
-  do_blocking_move_to(current_position[X_AXIS], current_position[Y_AXIS], z_before);
-  do_blocking_move_to(x - X_PROBE_OFFSET_FROM_EXTRUDER, y - Y_PROBE_OFFSET_FROM_EXTRUDER, current_position[Z_AXIS]);
+  //do_blocking_move_to(current_position[X_AXIS], current_position[Y_AXIS], z_before);
+  //do_blocking_move_to(x - X_PROBE_OFFSET_FROM_EXTRUDER, y - Y_PROBE_OFFSET_FROM_EXTRUDER, current_position[Z_AXIS]);
 
-  engage_z_probe();   // Engage Z Servo endstop if available
+  clean_up_after_endstop_move();
+  do_blocking_move_to(current_position[X_AXIS], current_position[Y_AXIS], z_before); // this also updates current_position
+  do_blocking_move_to(x, y, current_position[Z_AXIS]); // this also updates current_position
+  setup_for_endstop_move();
+
+  //engage_z_probe();   // Engage Z Servo endstop if available
   run_z_probe();
   float measured_z = current_position[Z_AXIS];
-  retract_z_probe();
+  //retract_z_probe();
 
   SERIAL_PROTOCOLPGM(MSG_BED);
   SERIAL_PROTOCOLPGM(" x: ");
@@ -1940,9 +1968,10 @@ void process_commands()
             // TODO: make sure the bed_level_rotation_matrix is identity or the planner will get set incorectly
             setup_for_endstop_move();
 
-            feedrate = homing_feedrate[Z_AXIS];
+            feedrate = homing_feedrate[Z_AXIS]/4;
 
             run_z_probe();
+	   
             SERIAL_PROTOCOLPGM(MSG_BED);
             SERIAL_PROTOCOLPGM(" X: ");
             SERIAL_PROTOCOL(current_position[X_AXIS]);
@@ -4524,6 +4553,70 @@ bool setTargetedHotend(int code){
   return false;
 }
 
+/** G28 by Rossonet per funzioni **/
+void gcode_G28_ros() {
+
+#ifdef ENABLE_AUTO_BED_LEVELING
+      plan_bed_level_matrix.set_to_identity();  //Reset the plane ("erase" all leveling data)
+#endif //ENABLE_AUTO_BED_LEVELING
+		if (Stopped==true) Stopped=false;
+
+      saved_feedrate = feedrate;
+      saved_feedmultiply = feedmultiply;
+      feedmultiply = 100;
+      previous_millis_cmd = millis();
+
+      enable_endstops(true);
+
+      for(int8_t i=0; i < NUM_AXIS; i++) {
+        destination[i] = current_position[i];
+      }
+      feedrate = 0.0;
+
+#ifdef DELTA
+          // A delta can only safely home all axis at the same time
+          // all axis have to home at the same time
+		
+          // Move all carriages up together until the first endstop is hit.
+          current_position[X_AXIS] = 0;
+          current_position[Y_AXIS] = 0;
+          current_position[Z_AXIS] = 0;
+          plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS]);
+
+          destination[X_AXIS] = 3 * Z_MAX_LENGTH;
+          destination[Y_AXIS] = 3 * Z_MAX_LENGTH;
+          destination[Z_AXIS] = 3 * Z_MAX_LENGTH;
+          
+          feedrate = 1.732 * homing_feedrate[X_AXIS];
+          plan_buffer_line(destination[X_AXIS], destination[Y_AXIS], destination[Z_AXIS], destination[E_AXIS], feedrate/60, active_extruder);
+          st_synchronize();
+          endstops_hit_on_purpose();
+
+          current_position[X_AXIS] = destination[X_AXIS];
+          current_position[Y_AXIS] = destination[Y_AXIS];
+          current_position[Z_AXIS] = destination[Z_AXIS];
+
+          // take care of back off and rehome now we are all at the top
+          HOMEAXIS(X);
+          HOMEAXIS(Y);
+          HOMEAXIS(Z);
+
+          calculate_delta(current_position);
+          plan_set_position(delta[X_AXIS], delta[Y_AXIS], delta[Z_AXIS], current_position[E_AXIS]);
+
+#endif // else DELTA
+
+      #ifdef ENDSTOPS_ONLY_FOR_HOMING
+        enable_endstops(false);
+      #endif
+
+      feedrate = saved_feedrate;
+      feedmultiply = saved_feedmultiply;
+      previous_millis_cmd = millis();
+      endstops_hit_on_purpose();
+
+}
+
 // by Rossonet
 /**
  * Propone un setting ottimale per il diametro della delta
@@ -4533,17 +4626,20 @@ bool setTargetedHotend(int code){
  *
  *
  */
-inline void gcode_G667() {
-	float centroX = 20;
-	float centroY = 20;
-	float torreXX = -70;
-	float torreXY = -30;
-	float torreYX = 105;
-	float torreYY = -30;
-	float torreZX = 20;
-	float torreZY = 114;
 
-	float baseRilevamentiZ = 60.0;
+void gcode_G667() {
+    	feedrate = homing_feedrate[Z_AXIS] / 6;
+
+	float centroX = -65;
+	float centroY = 5;
+	float torreXX = -109;
+	float torreXY = -20;
+	float torreYX = -10;
+	float torreYY = -20;
+	float torreZX = -65;
+	float torreZY = 80;
+
+	float baseRilevamentiZ = 130.0;
 
 	int cicliTorri = 3;
 	int cicliRaggio = 2;
@@ -4580,11 +4676,23 @@ inline void gcode_G667() {
 	for (int contatoreCicli = 1; contatoreCicli <= (cicliTorri+cicliRaggio); contatoreCicli++){
 		gcode_G28_ros();
 		st_synchronize();
-		if (contatoreCicli>cicliTorri) rilevamentoCentro = probe_pt(centroX, centroY, baseRilevamentiZ, ProbeDeploy, 1);
-		if (contatoreCicli>cicliTorri) rilevamentoX = probe_pt(torreXX, torreXY, baseRilevamentiZ, ProbeStay, 1);
-		if (!(contatoreCicli>cicliTorri)) rilevamentoX = probe_pt(torreXX, torreXY, baseRilevamentiZ, ProbeDeploy, 1);
-		rilevamentoY = probe_pt(torreYX, torreYY, baseRilevamentiZ, ProbeStay, 1);
-		rilevamentoZ = probe_pt(torreZX, torreZY, baseRilevamentiZ, ProbeStow, 1);
+		if (contatoreCicli>cicliTorri) {
+			//rilevamentoCentro = probe_pt(centroX, centroY, baseRilevamentiZ, ProbeDeploy, 1);
+			engage_z_probe();
+			rilevamentoCentro = probe_pt(centroX, centroY, baseRilevamentiZ);
+		}
+		//if (contatoreCicli>cicliTorri) rilevamentoX = probe_pt(torreXX, torreXY, baseRilevamentiZ, ProbeStay, 1);
+		if (contatoreCicli>cicliTorri) rilevamentoX = probe_pt(torreXX, torreXY, baseRilevamentiZ);
+		if (!(contatoreCicli>cicliTorri)) {
+			//rilevamentoX = probe_pt(torreXX, torreXY, baseRilevamentiZ, ProbeDeploy, 1);
+			engage_z_probe();
+			rilevamentoX = probe_pt(torreXX, torreXY, baseRilevamentiZ);
+		}
+		//rilevamentoY = probe_pt(torreYX, torreYY, baseRilevamentiZ, ProbeStay, 1);
+		rilevamentoY = probe_pt(torreYX, torreYY, baseRilevamentiZ);
+		//rilevamentoZ = probe_pt(torreZX, torreZY, baseRilevamentiZ, ProbeStow, 1);
+		rilevamentoZ = probe_pt(torreZX, torreZY, baseRilevamentiZ);
+		retract_z_probe();
 		SERIAL_ECHOLNPGM("Rilevamento (mm):"); 
 		CONFIG_ECHO_START; 
 		if (contatoreCicli>cicliTorri) SERIAL_ECHOPAIR("Centro:", rilevamentoCentro); 
@@ -4704,93 +4812,16 @@ inline void gcode_G667() {
 	gcode_G28_ros();
 }
 
-/**
- * Spurgo estrusore in posizione specifica fuori dal raggio
- * di stampa
- *
- * Questa funzione è un precursore per il cambio utensili
- *
- */
-inline void gcode_G668() {
-	SERIAL_ECHOLNPGM("Comando G668 in fase di implementazione...");
-}
-
-/** G28 by Rossonet per funzioni **/
-void gcode_G28_ros() {
-
-	// Wait for planner moves to finish!
-	st_synchronize();
-
-	// For auto bed leveling, clear the level matrix
-#ifdef ENABLE_AUTO_BED_LEVELING
-	plan_bed_level_matrix.set_to_identity();
 #ifdef DELTA
-	reset_bed_level();
-#endif
-#endif
-
-	// For manual bed leveling deactivate the matrix temporarily
-#ifdef MESH_BED_LEVELING
-	uint8_t mbl_was_active = mbl.active;
-	mbl.active = 0;
-#endif
-
-	setup_for_endstop_move();
-
-	set_destination_to_current();
-
-	feedrate = 0.0;
-
-	// A delta can only safely home all axis at the same time
-	// all axis have to home at the same time
-
-	// Pretend the current position is 0,0,0
-	for (int i = X_AXIS; i <= Z_AXIS; i++) current_position[i] = 0;
-	sync_plan_position();
-
-	// Move all carriages up together until the first endstop is hit.
-	while (! ((READ(X_MAX_PIN)^X_MAX_ENDSTOP_INVERTING)||(READ(Y_MAX_PIN)^Y_MAX_ENDSTOP_INVERTING)||(READ(Z_MAX_PIN)^Z_MAX_ENDSTOP_INVERTING))){
-		for (int i = X_AXIS; i <= Z_AXIS; i++) destination[i] = 150 * Z_MAX_LENGTH;
-		feedrate = 3 * homing_feedrate[X_AXIS];
-		line_to_destination();
-		st_synchronize();
-		}
-	endstops_hit_on_purpose(); // clear endstop hit flags
-
-	// Destination reached
-	for (int i = X_AXIS; i <= Z_AXIS; i++) current_position[i] = destination[i];
-
-	// take care of back off and rehome now we are all at the top
-	HOMEAXIS(X);
-	HOMEAXIS(Y);
-	HOMEAXIS(Z);
-
-	sync_plan_position_delta();
-
-  #ifdef ENDSTOPS_ONLY_FOR_HOMING
-    enable_endstops(false);
-  #endif
-
-  // For manual leveling move back to 0,0
-  #ifdef MESH_BED_LEVELING
-    if (mbl_was_active) {
-      current_position[X_AXIS] = mbl.get_x(0);
-      current_position[Y_AXIS] = mbl.get_y(0);
-      set_destination_to_current();
-      feedrate = homing_feedrate[X_AXIS];
-      line_to_destination();
-      st_synchronize();
-      current_position[Z_AXIS] = MESH_HOME_SEARCH_Z;
-      sync_plan_position();
-      mbl.active = 1;
-    }
-  #endif
-
-  feedrate = saved_feedrate;
-  feedrate_multiplier = saved_feedrate_multiplier;
-  refresh_cmd_timeout();
-  endstops_hit_on_purpose(); // clear endstop hit flags
+inline void set_current_to_destination() { memcpy(current_position, destination, sizeof(current_position)); }
+/**
+* Calculate delta, start a line, and set current_position to destination
+*/
+void prepare_move_raw() {
+	refresh_cmd_timeout();
+	calculate_delta(destination);
+	plan_buffer_line(delta[X_AXIS], delta[Y_AXIS], delta[Z_AXIS], destination[E_AXIS], (feedrate/60), active_extruder);
+	set_current_to_destination();
 }
-
-
+#endif
 

@@ -84,7 +84,7 @@ static bool old_x_min_endstop=false;
 static bool old_x_max_endstop=false;
 static bool old_y_min_endstop=false;
 static bool old_y_max_endstop=false;
-static bool old_z_min_endstop=false;
+static bool old_z_min_endstop=true;
 static bool old_z_max_endstop=false;
 static bool old_bedstop=false;
 
@@ -505,8 +505,8 @@ ISR(TIMER1_COMPA_vect)
       count_direction[Z_AXIS]=-1;
       CHECK_ENDSTOPS
       {
-         #if defined(SENS_BED) && SENS_BED > -1
-          bool z_min_endstop=(READ(SENS_BED)!=1);
+         #if defined(Z_MIN_PIN) && Z_MIN_PIN > -1
+          bool z_min_endstop=(READ(Z_MIN_PIN)!=1);
           if(z_min_endstop && old_z_min_endstop ) {
             endstops_trigsteps[Z_AXIS] = count_position[Z_AXIS];
             bedstop_hit=true;

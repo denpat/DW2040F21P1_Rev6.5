@@ -1298,6 +1298,9 @@ PK 7       69       A15
  #endif
 #endif
 
+#define SERVO0_PIN 22
+#define Z_MIN_PIN 30
+
 #define LARGE_FLASH true
 
 #define X_STEP_PIN 25
@@ -1314,7 +1317,7 @@ PK 7       69       A15
 
 #define Z_STEP_PIN 37
 #define Z_DIR_PIN 39
-#define Z_MIN_PIN -1 //30 
+//#define Z_MIN_PIN -1 //30 
 #define Z_MAX_PIN 32
 #define Z_ENABLE_PIN 35
 

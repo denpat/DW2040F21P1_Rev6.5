@@ -713,7 +713,8 @@ static void lcd_prepare_menu()
     
     MENU_ITEM(gcode, MSG_DISABLE_STEPPERS, PSTR("M84"));
     MENU_ITEM(gcode, MSG_AUTO_HOME, PSTR("G28"));
-	MENU_ITEM(function, MSG_FIL_CRG, goto_manual_xy);
+    MENU_ITEM(gcode, "G667", PSTR("G667"));
+    MENU_ITEM(function, MSG_FIL_CRG, goto_manual_xy);
     MENU_ITEM(submenu, MSG_MOVE_AXIS, lcd_move_menu);
     //MENU_ITEM(gcode, MSG_SET_ORIGIN, PSTR("G92 X0 Y0 Z0"));
     
