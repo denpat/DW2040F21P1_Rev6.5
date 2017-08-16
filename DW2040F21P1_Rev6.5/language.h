@@ -1806,7 +1806,7 @@ http://www.wasproject.it
 	#define MSG_X_MAX "x_max: "
 	#define MSG_Y_MIN "y_min: "
 	#define MSG_Y_MAX "y_max: "
-	#define MSG_Z_MIN "z_min: "
+	#define MSG_Z_MIN "probe z: "
 	#define MSG_Z_MAX "z_max: "
 	#define MSG_M119_REPORT "Reporting endstop status"
 	#define MSG_ENDSTOP_HIT "TRIGGERED"

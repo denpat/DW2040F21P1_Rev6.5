@@ -196,6 +196,9 @@ void clamp_to_software_endstops(float target[3]);
 
 void refresh_cmd_timeout(void);
 
+void gcode_G667();
+void prepare_move_raw();
+
 #ifdef FAST_PWM_FAN
 void setPwmFrequency(uint8_t pin, int val);
 #endif
@@ -292,3 +295,6 @@ extern void digipot_i2c_init();
 #endif
 
 #endif
+
+#define SERIAL_CHAR(x) MYSERIAL.write(x)
+#define SERIAL_EOL SERIAL_CHAR('\n')
